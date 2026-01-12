@@ -29,14 +29,23 @@ implemented.
 Even those aspects that have been implemented are still subject to
 change as the design is iterated upon and refined.
 
-Requirements
-============
+Requirements and Operational Guarantees
+=======================================
+
+Scope Note
+----------
+
+These should be considered preliminary requirements and are subject to change.
+The APDB and PPDB are used interchangeably in some Rubin design documents, in
+particular within the DPDD, since these did not constitute distinct systems
+when the documents were written.
+Further clarification will be needed to determine which requirements apply
+specifically to the PPDB, though some are shared between both systems.
+Finally, some of the requirements are generic ones that apply to any Rubin
+database system, though they may still be relevant to the PPDB.
 
 Functional Requirements
 -----------------------
-
-TODO: Requirements need to be cleaned up as many of them relate to the APDB,
-which was conflated with the PPDB in most of these design documents.
 
 The following requirements may be assumed based on Rubin design documents:
 
@@ -55,9 +64,9 @@ The following requirements may be assumed based on Rubin design documents:
    determination :cite:`LSE-61`.
 
 4. **Reproducible & Complex Querying:** Enable queries on all Level 1 data
-   products to be reproducible over time [LDM-555, LSE-61] and support complex
-   queries, including spatial correlations and time series comparisons, using
-   ADQL (a superset of SQL92) :cite:`LDM-135` :cite:`LSE-61` :cite:`LDM-555`.
+   products to be reproducible over time and support complex queries, including
+   spatial correlations and time series comparisons, using ADQL (a superset of
+   SQL92) :cite:`LDM-135` :cite:`LSE-61` :cite:`LDM-555`.
 
 5. **High System Availability and Data Integrity:** The database system must
    maintain at least 98% uptime and must not lose data due to hardware/software
@@ -75,124 +84,51 @@ The following requirements may be assumed based on Rubin design documents:
    with history available to the user. Nightly Data Quality, DMS Performance,
    and Calibration Reports must be generated within 4 hours :cite:`LSE-61`.
 
-These should be considered preliminary requirements and are subject to change.
-The APDB and PPDB are used interchangeably in some design documents, in
-particular within the DPDD, since these were not two distinct systems when
-the documents were written.
-Further clarification is needed to determine which requirements apply to
-which database, though some are shared between both systems.
-Finally, some of the requirements are generic ones that apply to any Rubin
-database system, though they may still be relevant to the PPDB.
+System Guarantees and Operational Constraints
+---------------------------------------------
 
-Non-Functional Requirements
----------------------------
+- User-visible consistency boundary: Production tables expose a contiguous
+  prefix of APDB replica chunks. No rows from chunk N+1 are visible unless all
+  rows for chunks <= N are visible.
 
-TODO: This section seems a bit unnecessarily long and detailed and could
-probably just be subsumed into the general requirements section.
+- Atomic promotion: A promotion run makes all selected chunks visible together
+  (table swap / equivalent). No partial visibility of a promoted batch.
 
-Data Processing
-^^^^^^^^^^^^^^^
+- Staging visibility: Staging tables and intermediate artifacts are not
+  user-queryable via TAP and are not part of the public contract.
 
-Creating a robust and error-tolerant data processing pipeline for ingesting
-data is critical to the success of the PPDB.
+- Ingestion latency target (provisional): Under nominal load, new chunks are
+  staged within X minutes of upload and promoted within Y minutes/hours of
+  being staged, subject to the 24-hour public availability requirement.
 
-The following non-functional requirements may be assumed in this area:
+- Failure behavior at user boundary: On failure of promotion, production tables
+  remain unchanged from the prior successful promotion. Failed batches do not
+  become partially visible.
 
-* Robust error handling should be implemented for each step of the data
-  processing pipeline.
-  It should be straightforward to identify and retry failed jobs without
-  causing duplicate data.
+- Observability minimums: The system logs chunk lifecycle transitions
+  (exported, uploaded, staged, promoted, failed/quarantined), including
+  timestamps and the responsible job/run ID; query logging is retained for N
+  days (or per Rubin policy).
 
-* Processes should be designed to keep up with projected data rates from the
-  APDB (TODO: include projections here???). In particular, bottlenecks should
-  be avoided for each process, which may involve careful monitoring and
-  optimization work.
+- Schema contract for ingest: Ingest accepts only APDB export chunks whose
+  schema version matches the target PPDB dataset version (or an explicitly
+  supported compatibility range, if you decide to allow that).
 
-* The data ingestion pipeline should eventually be designed to handle different
-  versions of the schema gracefully and seamlessly. This may involve using
-  different BigQuery datasets for different versions of the schema or
-  developing tools for converting from one schema version to another.
-  Migration tools may also be needed to convert existing data to a new schema.
+- TAP dataset binding contract: TAP exposes exactly one “active” PPDB dataset
+  mapping per environment (dev/test/prod) and the mapping change is an
+  explicit operational action (not implicit).
 
-* Each step of the data processing process should be idempotent, meaning that
-  if a step is retried, it will not cause duplicate data or errors.
-  Implementing this is highly involved, as it requires careful tracking of
-  state and ensuring that each operation can be safely retried. (In particular,
-  explicit checks must be performed so that duplicate data is not inserted.)
+- Throughput constraint: The export/upload/stage/promote pipeline must sustain
+  the expected APDB chunk rate without unbounded backlog under nominal operating conditions.
 
-* Each component in the system should be visible for monitoring and debugging
-  purposes, allowing for easy identification of issues and performance
-  bottlenecks.
-  This should be achievable using logging, metrics, and monitoring tools such
-  as Google Cloud Logging or custom dashboards.
-
-The processes which have been implemented so far in the prototype system
-generally do _not_ satisfy all of of these requirements; in particular,
-achieving an adequate level of idempotency and robustness to failure will
-require a significant amount of additional development and testing to achieve.
-
-System Architecture
-===================
-
-**TODO**
-
-Include diagram of system architecture here along with descriptions
-of:
-
-- All major components: APDB, exporter/uploader, chunk tracking DB,
-  Cloud Storage, Dataflow, BigQuery staging and production datasets,
-  TAP service, RSP, IAM.
-- Data flow between on-prem and cloud environments.
-- Trust boundaries and network connectivity (USDF <-> GCP).
-- Which systems are stateful vs. stateless. (E.g., chunk tracking DB is
-  stateful, Cloud Run functions are stateless, etc.).
-
-Components may forward reference their own dedicated sections.
-
-Dependencies and External Interfaces
-====================================
-
-List:
-
-- External systems and APIs (Cassandra APDB, GCP APIs, TAP, Phalanx, RSP,
-  Felis).
-- Expected versions and compatibility notes.
-- How external library updates are managed and tested.
-
-Security, Access Control and Compliance
-=======================================
-
-**TODO**
-
-Add a dedicated Security and Access Control section describing:
-
-- IAM role definitions for each component (exporter, uploader, Cloud Run,
-  Dataflow, TAP service).
-- Authentication mechanisms (service accounts, workload identity federation,
-  key rotation policies).
-- Network security: VPC, private service access, firewall rules.
-- Handling of sensitive metadata (user logs, query history).
-- Compliance with Rubin Observatory data-sharing policies (e.g., public vs.
-  internal data).
-
-Configuration, Parameterization, and Secrets Management
-=======================================================
-
-**TODO**
-
-Add a section outlining:
-
-- Configuration hierarchy (environment variables, YAML/JSON configs).
-- Use of Secret Manager for credentials, key files, and connection strings.
-- Mechanisms for versioning configuration (Terraform variables, CI/CD
-  environment separation).
+- Schema evolution constraint: The pipeline must support schema version changes
+  without silent corruption; migrations require an explicit procedure and
+  validation before cutover.
 
 Design Assumptions and Sizing
 =============================
 
 **TODO**
-
-Add a section quantifying:
 
 - Expected daily and cumulative data volume (GB/day, number of rows per table,
   total size after N years, etc.).
@@ -200,16 +136,116 @@ Add a section quantifying:
 - Project BigQuery dataset size and query concurrency assumptions.
 - Expected cost scaling under different usage patterns.
 
-Data Model and Database Schema
-==============================
+System Architecture
+===================
 
-TODO: Expand this section with:
+**TODO**
 
-- Mapping of Felis data types to BigQuery data types.
-- Description of data type conversions, null-handling, time precision or format
-  differences (if any).
-- Example YAML snippets for key tables (DiaObject, DiaSource, etc.).
-- Policy for handling deprecated columns and backward-compatibility handling.
+Once the System Architecture section is complete:
+
+- Remove duplicated descriptions of hybrid/on-prem vs cloud deployment from
+  *Data Ingestion → Overview*.
+- Ensure *Platform Integration and Controls → Identity, Access Control, and
+  Trust Boundaries* focuses only on enforcement controls (IAM, networking,
+  policy), not boundary definition.
+- Avoid reintroducing architectural descriptions in later sections.
+
+No authentication, authorization, or network policy details should be specified
+at the architectural level.
+
+Architecture Overview
+----------------------
+
+- The ingestion path (APDB → PPDB).
+- Where system state is coordinated.
+- Where data becomes visible to users.
+- The user query path (TAP → BigQuery).
+
+Architecture Diagram
+---------------------
+
+Insert a single architecture diagram (visual or ASCII) showing:
+
+- **USDF components**:
+  - APDB (Cassandra)
+  - Exporter
+  - Uploader
+
+- **Trust boundary** between USDF and GCP (explicitly labeled).
+
+- **GCP components**:
+  - Google Cloud Storage (GCS)
+  - Pub/Sub
+  - Cloud Run (staging trigger)
+  - Dataflow
+  - BigQuery staging datasets
+  - Cloud Run (promotion)
+  - BigQuery production and snapshot datasets
+
+- **State coordination**:
+  - Chunk tracking database (Postgres), accessible from both environments
+
+- **User access**:
+  - TAP service
+  - BigQuery production datasets
+  - TAP_SCHEMA database (if applicable)
+
+The diagram should show data flow direction and major control flow edges only.
+
+Trust Boundaries (Architectural)
+--------------------------------
+
+Describe trust boundaries at a diagram level only:
+
+- **Boundary A: USDF ↔ GCP**
+
+  - What crosses this boundary (e.g., Parquet files, manifests, DB connections,
+    Pub/Sub messages).
+
+- **Boundary B: Internal GCP**
+
+  - Service-to-service interactions within the cloud environment.
+
+- **Boundary C: User-facing access**
+
+  - Where user authentication terminates (TAP service) and how queries reach
+    BigQuery.
+
+Do not describe IAM roles or security controls here; those belong elsewhere.
+
+Stateful vs. Stateless Components
+---------------------------------
+
+Add a small table or bullet list classifying components as stateful or
+stateless:
+
+- **Stateful**:
+  - APDB
+  - Chunk tracking database
+  - BigQuery datasets
+  - GCS buckets
+  - TAP_SCHEMA database
+
+- **Stateless**:
+  - Exporter and uploader processes
+  - Cloud Run functions
+  - Dataflow jobs
+
+Clarify that some stateless components may use ephemeral local disk.
+
+.. _schema-and-data-model:
+
+Schema and Data Model
+=====================
+
+Schema Sources and Versioning
+-----------------------------
+
+**TODO**
+
+- Schema version numbering (semantic versioning)
+- Dataset naming conventions tied to schema versions (if any)
+- Backward-compatibility and deprecation policy
 
 Public scientific databases within the Rubin Observatory are generally
 considered to be part of the Science Data Model (SDM) schemas which are
@@ -225,52 +261,40 @@ and MySQL, but in other cases, such as the APDB, the schema's data model is
 translated into a different underlying implementation by an external library,
 which is Cassandra in that case.
 
-Dataset and Table Creation
---------------------------
+Table Definitions and Type Mapping
+----------------------------------
 
-For the PPDB in BigQuery, the APDB's existing YAML file should be used as the
-basic "source of truth" for the database schema, but Felis itself does not have
-native support for BigQuery as a target database backend.
-An additional library will be needed for creating BigQuery datasets and tables
-from the schema file programmatically using the BigQuery API
-(``google-cloud-bigquery``) or its command-line interface (``bq``).
-This library should be implemented in one or more Python modules which can be
-used as part of a command-line tool or script.
-The schema creation library will need to handle some BigQuery-specific features
-such as assignment of partitions and column clustering, which are not part of
-the Felis data model.
-Some additional columns not defined in the YAML schema may also need to be
-to be added for table optimization and management, such as a ``GEOGRAPHY``
-column for spatial queries or a derived temporal column for partitioning.
-Finally, a schema version will need to be attached to the dataset, as the basic
-data ingest must be done in a way that is compatible.
-Only APDB data with a matching version can be ingested into the PPDB.
-It be useful to encode the schema version directly into the dataset's name,
-e.g., ``ppdb_v9_0_0``, and it can also be assigned as a
-`label <https://cloud.google.com/bigquery/docs/labels-intro>` on the dataset
-using the BigQuery API or ``bq`` command-line tool so that it can be easily
-read programmatically.
+**TODO**
 
-In addition to handling of the primary dataset(s) containing the productions
-tables, it is likely that there will be additional datasets which need to be
-created for various purposes such as data staging and snapshot storage.
-Keeping all of the tables within the PPDB in a single dataset, even for a
-specific schema version, could lead to confusion and clutter, so separating
-them out into different datasets by their purpose is advisable.
-These can be distinguished by naming conventions, such as
-``ppdb_v{version}_staging`` for staging tables or ``ppdb_v{version}_snapshots``
-for backup snapshots.
-Many operations in BigQuery take advantage of
-`zero-copy cloning
-<https://cloud.google.com/bigquery/docs/table-clones-intro>`_ operations which
-do not require duplicating the underlying data, with subsequent changes to the
-cloned table being stored as deltas.
-These operations are very fast and efficient, so having multiple datasets
-should not cause significant overhead compared with a single one, provided that
-the datasets are all in the same GCP project and region.
+- Mapping of Felis data types to BigQuery data types.
 
-Extra Tables
-------------
+  - In particular, note here that BigQuery does not have native support for
+    integer types smaller than 64-bit, so all integer columns must be mapped
+    to ``INT64``.
+
+  - Additionally, the VOTable ``float`` type is a 32-bit datatype but
+    BigQuery's floating-point type is 64-bit, so ``double`` should be used
+    instead or ``float`` should automatically map to ``FLOAT64``.
+
+- Description of data type conversions, null-handling, time precision or format
+  differences (if any).
+- Example YAML snippets for key tables (DiaObject, DiaSource, etc.).
+- Policy for handling deprecated columns and backward-compatibility handling.
+
+Schema Constraints and Semantics
+--------------------------------
+
+**TODO**
+
+- Primary key definitions (including composite keys).
+- Expected uniqueness guarantees (or lack thereof).
+- Temporal validity semantics (e.g., validityStart/End fields).
+- Assumptions made by downstream services (e.g., TAP).
+
+.. _derived-and-auxiliary-tables:
+
+Derived and Auxiliary Tables
+----------------------------
 
 In addition to the three main production tables that are replicated to the
 PPDB from the APDB (``DiaObject``, ``DiaSource``, and ``DiaForcedSource``), it
@@ -278,10 +302,7 @@ may be useful to create additional tables for convenience and performance.
 The ``DiaObject`` table in particular has a composite primary key consisting of
 ``diaObjectId`` and ``validityStartMdjTai``, which means that there will be
 many records with the same ``diaObjectId`` value.
-This is likely to be be confusing for a typical science user, who may expect
-this ID column to be unique, and it also complicates certain types of queries,
-such as nearest neighbor searches, which have typically been designed with an
-expectation that there is a column with a unique identifier for each object.
+This table supports query patterns discussed in :ref:`data-access-patterns`.
 To address this, a ``DiaObjectLast`` table could be created which contains only
 the most recent version of each object, i.e., the record with the latest
 ``validityStartMdjTai`` value for each ``diaObjectId``.
@@ -294,8 +315,59 @@ In either case, users could then query directly on this table when they want to
 work with unique objects, and it could also simplify certain types of other
 queries.
 
+Dataset Layout and Naming
+-------------------------
+
+In addition to handling of the primary dataset(s) containing the productions
+tables, it is likely that there will be additional datasets which need to be
+created for various purposes such as data staging and snapshot storage.
+Keeping all of the tables within the PPDB in a single dataset, even for a
+specific schema version, could lead to confusion and clutter, so separating
+them out into different datasets by their purpose is advisable.
+These can be distinguished by naming conventions, such as
+``ppdb_v{version}_staging`` for staging tables or ``ppdb_v{version}_snapshots``
+for backup snapshots. Many operations in BigQuery take advantage of
+`zero-copy cloning
+<https://cloud.google.com/bigquery/docs/table-clones-intro>`_ operations which
+do not require duplicating the underlying data, with subsequent changes to the
+cloned table being stored as deltas.
+These operations are very fast and efficient, so having multiple datasets
+should not cause significant overhead compared with a single one, provided that
+the datasets are all in the same GCP project and region.
+
+Schema Tooling and Table Instantiation
+--------------------------------------
+
+For the PPDB in BigQuery, the APDB's existing YAML file should be used as the
+basic "source of truth" for the database schema, but Felis itself does not have
+native support for BigQuery as a target database backend.
+An additional library will be needed for creating BigQuery datasets and tables
+from the schema file programmatically using the BigQuery API
+(``google-cloud-bigquery``) or its command-line interface (``bq``).
+This library should be implemented in one or more Python modules which can be
+used as part of a command-line tool or script.
+The schema creation library will need to handle some BigQuery-specific table
+options which are not part of the Felis data model.
+Some additional columns not defined in the YAML schema may also need to be
+to be added for table optimization and management, such as a ``GEOGRAPHY``
+column for spatial queries or a derived temporal column for partitioning.
+Finally, a schema version will need to be attached to the dataset, as the basic
+data ingest must be done in a way that is compatible.
+Only APDB data with a matching version can be ingested into the PPDB.
+It be useful to encode the schema version directly into the dataset's name,
+e.g., ``ppdb_v9_0_0``, and it can also be assigned as a
+`label <https://cloud.google.com/bigquery/docs/labels-intro>` on the dataset
+using the BigQuery API or ``bq`` command-line tool so that it can be easily
+read programmatically.
+
 Schema Migrations
 -----------------
+
+**TODO**
+
+- Cutover strategy
+- Downtime expectations
+- Compatibility between old/new datasets
 
 Felis schemas may have an embedded version number which can be incremented when
 the schema is changed.
@@ -324,193 +396,50 @@ Significant downtime could be incurred during these migrations, and unforeseen
 problems could occur, so they should be scheduled during off-hours, as well as
 communicated to users in advance.
 
-Table Optimization
-------------------
+Platform Integration and Controls
+=================================
 
-TODO: Add PK and FK constraints where appropriate, even though they are not
-enforced by BigQuery, as they can help the query planner optimize queries.
-https://cloud.google.com/bigquery/docs/best-practices-performance-compute#specify_primary_key_and_foreign_key_constraints
+This section describes enforcement controls for the trust boundaries defined
+in System Architecture.
 
-Overview
-^^^^^^^^
+External Systems and Interfaces
+-------------------------------
 
-Performing queries on large tables in BigQuery can be expensive, as the billing
-cost is based on the amount of data scanned.
-Queries on unoptimized datasets can not only be costly but also have high
-latency due to the large amount of data that must be processed when no
-pruning is possible.
-Therefore, tables should be optimized for common query patterns, primarily by
-assigning
-`partitions <https://cloud.google.com/bigquery/docs/partitioned-tables>`_
-and
-`clustering columns <https://cloud.google.com/bigquery/docs/clustered-tables>`_
-where appropriate.
+**TODO**
 
-Partitioning divides a large table into smaller, more manageable segments based
-on a column's values.
-Relatively low cardinality columns are typically used for partitioning, such as
-a date or integer column.
-This allows queries that filter on the partitioning column to only scan the
-relevant partitions rather than the entire table, which can significantly
-reduce the amount of data scanned and improve query performance.
-Clustering organizes (orders) the data within each partition based on the
-values of one or more columns.
-This allows for more efficient filtering and searching on those columns, as
-data blocks can be skipped entirely if they do not match the filter criteria.
+- External systems and interfaces PPDB depends on or serves, including:
+  - Upstream data sources (APDB / Cassandra exports)
+  - Platform services (BigQuery, GCS, Pub/Sub, Dataflow, IAM)
+  - Downstream consumers (TAP service, RSP clients)
+  - Deployment/config tooling (Phalanx, Terraform/idf_deploy)
+  - Schema sources (Felis / SDM schemas)
+- Expected versions and compatibility notes.
+- How external library updates are managed and tested.
+- Interface assumptions and invariants (e.g., chunk ordering guarantees,
+  schema version compatibility, message schema stability).
 
-By default, when a partition column is assigned, each value is assigned to an
-individual partition, but partitioning can also be done using ranges of
-values, which may be more appropriate for some columns.
-In the latter case, a partitioning function must be defined to specify how the
-values are mapped to partitions.
-Clustering is hierarchical and can be assigned on up to four columns per table.
-The order of the columns in the clustering definition matters, as the first
-column determines the primary ordering of the data, the second column
-determines the secondary ordering (within the first column's ordering), and so
-on.
-This scheme can allow for more efficient filtering and searching on those
-columns, as data blocks can be skipped entirely if they do not match the filter
-criteria.
-In particular, filters on the first clustering column will be the most
-efficient, with decreasing efficiency for subsequent columns.
+Identity, Access Control, and Trust Boundaries
+----------------------------------------------
 
-Clustering
-^^^^^^^^^^
+**TODO**
 
-Unoptimized spatial searches would typically require a full table scan, with
-a high cost for big (multi-terabyte) tables, so spatial clustering should
-be particularly beneficial.
-Performance of these queries improves significant when a clustered
-``GEOGRAPHY`` column representing the spatial coordinates of an object
-is used instead of the numeric ``ra`` and ``dec`` values.
-Experimentation has shown that a cone search using the numeric columns on a ~14
-gigabyte ``DiaObject`` table results in a full table scan over all of the data.
-When the same search was performed using a clustered ``GEOGRAPHY`` column
-instead, the amount of scanned data was reduced to 64 MB, a reduction of over
-200x.
-Since spatial predicates are commonly used in astronomical database searches,
-this type of optimization will be critical for ensuring good performance and
-reasonable query costs.
+- IAM role definitions for each component (exporter, uploader, Cloud Run,
+  Dataflow, TAP service).
+- Authentication controls (service accounts, workload identity federation,
+  key rotation policies).
+- Network security: VPC, private service access, firewall rules.
+- Handling of sensitive metadata (user logs, query history).
+- Compliance with Rubin Observatory data-sharing policies (e.g., public vs.
+  internal data).
 
-Another approach could be using a customized pixelization scheme with HEALPix
-or HTM for partitioning or clustering.
-However, initial experiments indicate that BigQuery's built-in clustering does
-a very good job optimizing spatial queries, at least when the spatial column is
-the first clustering column.
-A custom scheme would require significant additional effort to implement and
-maintain, and it would add complexity to the system.
-The TAP layer or some other middleware component would need to perform
-translations to/from these pixel values and find the records that were
-contained within them.
-It is likely that user queries would need to be rewritten automatically to
-include a filter on the pixel values.
-Finally, the typical resolution of astronomical pixels is much too granular to
-use them directly in partitioning, as the number of partitions would exceed the
-maximum allowed by BigQuery, so a coarse pixel segmentation would be needed to
-divide records into a manageable number of partitions (if partitioning was
-being used).
-Because of these downsides, and the fact that BigQuery's built-in clustering
-apparently does an excellent job optimizing spatial queries, a custom
-pixelization scheme for the PPDB is not recommended at this time.
+Configuration and Secrets Management
+------------------------------------
 
-Should the primary production tables be first clustered on a spatial column,
-this would optimize spatial queries but degrade the performance of other types
-of queries.
-The ``diaObjectI`` is a good candidate for the second clustering column, as it
-would help to optimize single object queries, which are also a common query
-pattern.
-However, testing has shown that there is a significant degradation in
-performance on the single object selections when ``diaObjectId`` is the second
-clustering column compared to when it is the first.
-This is likely because the data is not well ordered on ``diaObjectId`` when it
-is the second column, so a large amount of data still needs to be scanned.
-Other optimization techniques may be considered, such as using multiple copies
-of the tables with different clustering strategies to optimize different query
-patterns (see below).
+**TODO**
 
-Partitioning
-^^^^^^^^^^^^
-
-An optimal partitioning strategy seems less clear compared with clustering
-after the usage of spatial partitioning has ruled out.
-Temporal partitioning is commonly used in many types of databases, but in the
-case of the PPDB, it is not obvious that this would be beneficial, as most
-queries are not anticipated to be time-based.
-The tables do have temporal columns, such as ``validityStartMjdTai``, which is
-the start time of validity for each record in a
-`TAI <https://en.wikipedia.org/wiki/International_Atomic_Time>`_,
-`MJD <https://core2.gsfc.nasa.gov/time/>`_ format.
-A floor of this value would be equivalent to the date, which could be used for
-partitioning.
-This would be straightforward to implement during data ingestion, and an
-additional column (hidden from users) could be added to the tables to store
-this value.
-Although most queries are not expected to filter on this column, it could
-still be useful for certain types of queries, particularly for dataset
-management and maintenance.
-Temporal predicates in user queries could also be rewritten to use this column
-when appropriate, which could improve performance for those queries.
-
-One advantage of using this type of partitioning would be relatively equal data
-distribution across partitions, as the number of records ingested each day
-should be relatively consistent compared with other columns which may have
-skewed distributions.
-Even if this type of partitioning would not significantly improve the
-performance of typical queries, some reasonable partition scheme will be needed
-because BigQuery's performance degrades on un-partitioned tables as they grow
-beyond a certain size.
-
-Temporal partitioning is also not the only option available; other columns
-could be considered, such as using object ID columns, which could potentially
-be particularly helpful in improving single object searches and joins.
-However, these types of columns may naturally have a skewed distribution of
-values, and they have much too high cardinality to be used directly for
-partitioning.
-So a hashing scheme would be needed to map the values evenly to a manageable
-number of partitions.
-This would add complexity to the system, probably requiring some rewriting of
-user queries to use the hashed/bucketed values.
-But this type of partitioning may be the only way to optimize certain query
-patterns, so it may be worth considering long-term.
-
-Performance-optimized Table Copies
-----------------------------------
-
-Since there are significant trade-offs in performance when selecting the
-partitioning and clustering columns, it may be desirable to have
-performance-optimized table copies which can be used for optimizing certain
-query patterns.
-For instance, a ``DiaObject_byId`` table could be created from a clone of
-``DiaObject``.
-This would be identical in content but clustered first on ``diaObjectId``, and
-then possibly a spatial column.
-This should significantly improve the performance of single object queries as
-the min/max statistics for each data block would be much more selective.
-These table copies could be used explicitly by users in their queries and made
-available via the TAP service, or they could be used implicitly via query
-rewriting.
-These tables could be created using BigQuery's zero-copy cloning feature, which
-is very fast and efficient, and they could be updated periodically as needed,
-probably when the main production tables were updated.
-Since storage costs are relatively low (less than $25 / month / TB) compared to
-query costs, having multiple copies of tables optimized for different query
-patterns may be worthwhile to reduce the overall cost of the system.
-
-Materialized Views
-------------------
-
-Another option which could help optimize table access is using materialized
-views, which are pre-computed views that can be queried like a table.
-Though these do not by default use the same optimizations as the underlying
-table, such as clustering columns, they can be partitioned and clustered
-independently.
-In particular, ``DiaObjectLast``, mentioned above as an extra table, could be
-implemented as a materialized view instead of a physical table, which would
-simplify the data processing and ensure that it is always up to date with the
-latest data.
-Since they may have different clustering columns, performance-optimized table
-copies could also be implemented as materialized views, which would allow them
-to be updated automatically as the underlying data changes.
+- Configuration hierarchy (environment variables, YAML/JSON configs).
+- Use of Secret Manager for credentials, key files, and connection strings.
+- Configuration versioning and environment separation (dev/test/prod).
 
 Data Ingestion
 ==============
@@ -769,16 +698,37 @@ Error Handling and Recovery Scenarios
 
 **TODO**
 
-Create a section expanding on:
+Moved from requirements section:
 
+- Robust error handling should be implemented for each step of the data
+  processing pipeline.
+  It should be straightforward to identify and retry failed jobs without
+  causing duplicate data.
+- Each step of the data processing process should be idempotent, meaning that
+  if a step is retried, it will not cause duplicate data or errors.
+  Implementing this is highly involved, as it requires careful tracking of
+  state and ensuring that each operation can be safely retried. (In particular,
+  explicit checks must be performed so that duplicate data is not inserted.)
+- Each component in the system should be visible for monitoring and debugging
+  purposes, allowing for easy identification of issues and performance
+  bottlenecks.
+  This should be achievable using logging, metrics, and monitoring tools such
+  as Google Cloud Logging or custom dashboards.
+
+Contents:
 - How each pipeline stage recovers from transient vs. persistent errors.
 - Retry policies for Cloud Run and Dataflow.
 - Handling of partially ingested chunks or out-of-order data.
 - Criteria for quarantining or skipping problematic chunks.
 - Manual intervention playbooks for operators.
 
-User Access
-===========
+The processes which have been implemented so far in the prototype system
+generally do _not_ satisfy all of of these requirements; in particular,
+achieving an adequate level of idempotency and robustness to failure will
+require a significant amount of additional development and testing to achieve.
+
+Application Services
+====================
 
 TAP Service
 -----------
@@ -834,9 +784,8 @@ including but not limited to:
 - Integration with other Rubin extensions and modifications to the TAP service
   used on the RSP, some of which are described in *SQR-099* :cite:`SQR-099`.
 
-Overall, the current TAP service implementation should be viewed as a proof of
-concept rather than a production-ready system, and it may undergo significant
-revision before it is suitable for use within an operational environment.
+The current TAP service implementation should be considered non-production and
+subject to significant re-architecting and revision.
 
 TAP Schema
 ^^^^^^^^^^
@@ -876,27 +825,14 @@ Java code, e.g., ``ppdb`` in TAP_SCHEMA is mapped to
 Ideally, this mapping would be configurable in some way, either via a
 configuration file, argument to the TAP server, or environment variable.
 
-Table Uploads
-^^^^^^^^^^^^^
+.. _data-access-patterns:
 
-TODO: More details could be included in this section on how user uploads could
-be implemented and what limitations there may be, e.g., size limits, expiration
-time, etc.
+Data Access Patterns
+====================
 
-The TAP REC includes support for uploading user tables, which the BigQuery
-implementation should eventually include.
-This would need to be implemented as a custom backend service, as no standard
-implementation exists for BigQuery.
-A starting point could be the `CREATE TEMP TABLE` syntax which is natively
-supported, which would at least allow usage of uploaded data within a single
-query.
-However, this would likely be only a temporary solution, as it does not allow
-users to store their tables long-term or use them in multiple queries, e.g.,
-for cross-matching.
-The proper solution would likely involve creating of tables in a separate
-BigQuery dataset (and possibly within another GCP project) for security and
-access control reasons, as well as to avoid cluttering the main PPDB dataset
-with potentially hundreds of user tables.
+Some query patterns desrcibed below rely on tables described in
+:ref:`derived-and-auxiliary-tables` (e.g., ``DiaObjectLast``) rather than the
+main production tables defined in the APDB schema.
 
 Spatial Query Support
 ---------------------
@@ -1068,43 +1004,264 @@ tables, may also be used to skip over data blocks that do not contain any
 matching records, though this cannot be relied upon as a consistent
 optimization strategy.
 
-Testing, Validation, and QA Strategy
-====================================
+Table Uploads
+-------------
+
+TODO: More details could be included in this section on how user uploads could
+be implemented and what limitations there may be, e.g., size limits, expiration
+time, etc.
+
+The TAP REC includes support for uploading user tables, which the BigQuery
+implementation should eventually include.
+This would need to be implemented as a custom backend service, as no standard
+implementation exists for BigQuery.
+A starting point could be the `CREATE TEMP TABLE` syntax which is natively
+supported, which would at least allow usage of uploaded data within a single
+query.
+However, this would likely be only a temporary solution, as it does not allow
+users to store their tables long-term or use them in multiple queries, e.g.,
+for cross-matching.
+The proper solution would likely involve creating of tables in a separate
+BigQuery dataset (and possibly within another GCP project) for security and
+access control reasons, as well as to avoid cluttering the main PPDB dataset
+with potentially hundreds of user tables.
+
+Query Optimization and Table Organization
+=========================================
+
+TODO: Perhaps add PK and FK constraints where appropriate, even though they are
+not enforced by BigQuery, as they can help the query planner optimize queries,
+e.g.
+https://cloud.google.com/bigquery/docs/best-practices-performance-compute#specify_primary_key_and_foreign_key_constraints
+
+Overview
+--------
+
+Performing queries on large tables in BigQuery can be expensive, as the billing
+cost is based on the amount of data scanned.
+Queries on unoptimized datasets can not only be costly but also have high
+latency due to the large amount of data that must be processed when no
+pruning is possible.
+Therefore, tables should be optimized for common query patterns, primarily by
+assigning
+`partitions <https://cloud.google.com/bigquery/docs/partitioned-tables>`_
+and
+`clustering columns <https://cloud.google.com/bigquery/docs/clustered-tables>`_
+where appropriate.
+
+Partitioning divides a large table into smaller, more manageable segments based
+on a column's values.
+Relatively low cardinality columns are typically used for partitioning, such as
+a date or integer column.
+This allows queries that filter on the partitioning column to only scan the
+relevant partitions rather than the entire table, which can significantly
+reduce the amount of data scanned and improve query performance.
+Clustering organizes (orders) the data within each partition based on the
+values of one or more columns.
+This allows for more efficient filtering and searching on those columns, as
+data blocks can be skipped entirely if they do not match the filter criteria.
+
+By default, when a partition column is assigned, each value is assigned to an
+individual partition, but partitioning can also be done using ranges of
+values, which may be more appropriate for some columns.
+In the latter case, a partitioning function must be defined to specify how the
+values are mapped to partitions.
+Clustering is hierarchical and can be assigned on up to four columns per table.
+The order of the columns in the clustering definition matters, as the first
+column determines the primary ordering of the data, the second column
+determines the secondary ordering (within the first column's ordering), and so
+on.
+This scheme can allow for more efficient filtering and searching on those
+columns, as data blocks can be skipped entirely if they do not match the filter
+criteria.
+In particular, filters on the first clustering column will be the most
+efficient, with decreasing efficiency for subsequent columns.
+
+Clustering
+----------
+
+Unoptimized spatial searches would typically require a full table scan, with
+a high cost for big (multi-terabyte) tables, so spatial clustering should
+be particularly beneficial.
+Performance of these queries improves significant when a clustered
+``GEOGRAPHY`` column representing the spatial coordinates of an object
+is used instead of the numeric ``ra`` and ``dec`` values.
+Experimentation has shown that a cone search using the numeric columns on a ~14
+gigabyte ``DiaObject`` table results in a full table scan over all of the data.
+When the same search was performed using a clustered ``GEOGRAPHY`` column
+instead, the amount of scanned data was reduced to 64 MB, a reduction of over
+200x.
+Since spatial predicates are commonly used in astronomical database searches,
+this type of optimization will be critical for ensuring good performance and
+reasonable query costs.
+
+Another approach could be using a customized pixelization scheme with HEALPix
+or HTM for partitioning or clustering.
+However, initial experiments indicate that BigQuery's built-in clustering does
+a very good job optimizing spatial queries, at least when the spatial column is
+the first clustering column.
+A custom scheme would require significant additional effort to implement and
+maintain, and it would add complexity to the system.
+The TAP layer or some other middleware component would need to perform
+translations to/from these pixel values and find the records that were
+contained within them.
+It is likely that user queries would need to be rewritten automatically to
+include a filter on the pixel values.
+Finally, the typical resolution of astronomical pixels is much too granular to
+use them directly in partitioning, as the number of partitions would exceed the
+maximum allowed by BigQuery, so a coarse pixel segmentation would be needed to
+divide records into a manageable number of partitions (if partitioning was
+being used).
+Because of these downsides, and the fact that BigQuery's built-in clustering
+apparently does an excellent job optimizing spatial queries, a custom
+pixelization scheme for the PPDB is not recommended at this time.
+
+Should the primary production tables be first clustered on a spatial column,
+this would optimize spatial queries but degrade the performance of other types
+of queries.
+The ``diaObjectI`` is a good candidate for the second clustering column, as it
+would help to optimize single object queries, which are also a common query
+pattern.
+However, testing has shown that there is a significant degradation in
+performance on the single object selections when ``diaObjectId`` is the second
+clustering column compared to when it is the first.
+This is likely because the data is not well ordered on ``diaObjectId`` when it
+is the second column, so a large amount of data still needs to be scanned.
+Other optimization techniques may be considered, such as using multiple copies
+of the tables with different clustering strategies to optimize different query
+patterns (see below).
+
+Partitioning
+------------
+
+An optimal partitioning strategy seems less clear compared with clustering
+after the usage of spatial partitioning has ruled out.
+Temporal partitioning is commonly used in many types of databases, but in the
+case of the PPDB, it is not obvious that this would be beneficial, as most
+queries are not anticipated to be time-based.
+The tables do have temporal columns, such as ``validityStartMjdTai``, which is
+the start time of validity for each record in a
+`TAI <https://en.wikipedia.org/wiki/International_Atomic_Time>`_,
+`MJD <https://core2.gsfc.nasa.gov/time/>`_ format.
+A floor of this value would be equivalent to the date, which could be used for
+partitioning.
+This would be straightforward to implement during data ingestion, and an
+additional column (hidden from users) could be added to the tables to store
+this value.
+Although most queries are not expected to filter on this column, it could
+still be useful for certain types of queries, particularly for dataset
+management and maintenance.
+Temporal predicates in user queries could also be rewritten to use this column
+when appropriate, which could improve performance for those queries.
+
+One advantage of using this type of partitioning would be relatively equal data
+distribution across partitions, as the number of records ingested each day
+should be relatively consistent compared with other columns which may have
+skewed distributions.
+Even if this type of partitioning would not significantly improve the
+performance of typical queries, some reasonable partition scheme will be needed
+because BigQuery's performance degrades on un-partitioned tables as they grow
+beyond a certain size.
+
+Temporal partitioning is also not the only option available; other columns
+could be considered, such as using object ID columns, which could potentially
+be particularly helpful in improving single object searches and joins.
+However, these types of columns may naturally have a skewed distribution of
+values, and they have much too high cardinality to be used directly for
+partitioning.
+So a hashing scheme would be needed to map the values evenly to a manageable
+number of partitions.
+This would add complexity to the system, probably requiring some rewriting of
+user queries to use the hashed/bucketed values.
+But this type of partitioning may be the only way to optimize certain query
+patterns, so it may be worth considering long-term.
+
+Performance-optimized Table Copies
+----------------------------------
+
+Since there are significant trade-offs in performance when selecting the
+partitioning and clustering columns, it may be desirable to have
+performance-optimized table copies which can be used for optimizing certain
+query patterns.
+For instance, a ``DiaObject_byId`` table could be created from a clone of
+``DiaObject``.
+This would be identical in content but clustered first on ``diaObjectId``, and
+then possibly a spatial column.
+This should significantly improve the performance of single object queries as
+the min/max statistics for each data block would be much more selective.
+These table copies could be used explicitly by users in their queries and made
+available via the TAP service, or they could be used implicitly via query
+rewriting.
+These tables could be created using BigQuery's zero-copy cloning feature, which
+is very fast and efficient, and they could be updated periodically as needed,
+probably when the main production tables were updated.
+Since storage costs are relatively low (less than $25 / month / TB) compared to
+query costs, having multiple copies of tables optimized for different query
+patterns may be worthwhile to reduce the overall cost of the system.
+
+Materialized Views
+------------------
+
+Another option which could help optimize table access is using materialized
+views, which are pre-computed views that can be queried like a table.
+Though these do not by default use the same optimizations as the underlying
+table, such as clustering columns, they can be partitioned and clustered
+independently.
+In particular, ``DiaObjectLast``, mentioned above as an extra table, could be
+implemented as a materialized view instead of a physical table, which would
+simplify the data processing and ensure that it is always up to date with the
+latest data.
+Since they may have different clustering columns, performance-optimized table
+copies could also be implemented as materialized views, which would allow them
+to be updated automatically as the underlying data changes.
+
+Testing and Validation
+======================
 
 **TODO**
 
-Add a section summarizing testing methodologies:
+- “Release gates”: what must pass before a deployment or schema migration
+- Regression detection tied to version changes
 
-- Unit/integration tests for ingestion and schema creation tools.
-- Validation checks on staged vs. production data.
-- Continuous integration (CI) setup, e.g., GitHub Actions workflows and linting.
-- Mock or sandbox environments for testing pipeline updates.
-
-Release and Versioning Plan
-===========================
+Functional Testing and Data Validation
+--------------------------------------
 
 **TODO**
 
-Document:
+- Unit tests for schema creation and utility libraries.
+- Integration tests for ingestion steps (export/upload/stage/promote), using a
+  sandbox project/dataset where possible.
+- Validation checks comparing staged vs. promoted data (row counts, key
+  coverage, checksum/aggregate comparisons where feasible).
+- Post-promotion integrity checks (e.g., expected constraints/invariants,
+  expected NULL/non-NULL fields, chunk continuity assertions).
+- Continuous integration (CI) setup (linting, formatting, unit tests, integration
+  smoke tests).
+- Test environment strategy (dev/test/prod isolation, synthetic datasets, and
+  replay of known-good chunks).
 
-- Version numbering for datasets, schema, and software (semantic version
-  alignment).
-- Tagging and release process across repositories.
-- Compatibility matrix between schema versions and code components.
-- Policy for deprecating older schema versions.
+Performance and Load Testing
+----------------------------
 
-Performance Testing and Validation
-==================================
+**TODO**
 
-Add a section detailing:
-
-- Benchmarks used (dataset sizes, query patterns).
-- Performance metrics collected (query latency, ingestion latency, throughput).
-- Validation methods to ensure data integrity post-ingestion.
-- Plans for load and stress testing before operations.
+- Benchmarks used (representative dataset sizes and representative query
+  patterns).
+- Metrics collected (query latency, ingestion latency, throughput, bytes scanned,
+  and job runtimes).
+- Load and stress testing plan (concurrency targets, backpressure behavior,
+  quota limits).
+- Performance regression detection (what is measured continuously vs. only
+  before major releases).
 
 Deployment and Operations
 =========================
+
+**TODO**
+
+- Release mechanics (Terraform applies, Cloud Run deploys, Dataflow template
+  updates)
+- Rollback strategy for bad releases
 
 Most components of the PPDB will be deployed and operated on GCP, though some
 need to run on-premises at the USDF.
@@ -1362,16 +1519,72 @@ and Optimization section with:
   Dataflow, GCS.
 - Cost-mitigation strategies: clustering reuse, scheduled query limits, cost
   alerts.
-- Reference to project quotas and budget enforcement mechanisms.
+- Reference to project quotas and budget enforcement controls.
 
 Conclusions
 ===========
 
-TODO: Convert bulleted lists in this section to numbered lists once their
-contents and ordering are finalized.
+**TODO**
+
+- Restate the design goal of PPDB-in-BigQuery
+- Summarize the chosen architecture (hybrid ingestion, chunking, BigQuery +
+  TAP)
+- Call out what is implemented vs. still prototype
+- State the primary open risks (without detailing them)
+- Point to future work and follow-on documents (cost model, ops maturity)
+
+Appendices
+==========
+
+Source-code Repositories
+------------------------
+
+TODO: Make this an appendix.
+
+The PPDB even in its current prototype form involves a large number of source
+code repositories.
+These are summarized below along with their purpose and location.
+
+.. list-table::
+   :header-rows: 1
+
+   * - **Repository**
+     - **Purpose**
+     - **Notes**
+   * - `dax_ppdb <https://github.com/lsst/dax_ppdb>`_
+     - Python interfaces for the PPDB
+     - Additional tooling for BigQuery is planned.
+   * - `dax_apdb <https://github.com/lsst/dax_apdb>`_
+     - Python interfaces for the APDB
+     - Used by ``dax_ppdb`` for accessing the APDB
+   * - `dax_ppdbx_gcp <https://github.com/lsst-dm/dax_ppdbx_gcp>`_
+     - GCP-specific extensions for ``dax_ppdb``
+     - Encapsulates the GCP dependencies and tools for ``dax_ppdb``
+   * - `ppdb-cloud-functions
+       <https://github.com/lsst-dm/ppdb-cloud-functions>`_
+     - Cloud Run functions for data processing on GCP
+     - May be split into one repo per function in the future
+   * - `ppdb-scripts <https://github.com/lsst-dm/ppdb-scripts>`_
+     - Ad hoc dev scripts and config, primarily for GCP
+     - Will be ported to Terraform or Python tools
+   * - `phalanx <https://github.com/lsst-sqre/phalanx>`__
+     - RSP application deployment framework
+     - Deployment and management of the ``ppdb-replication`` application
+   * - `idf_deploy <https://github.com/lsst/idf_deploy>`_
+     - RSP configuration and deployment using Terraform
+     - A PPDB project needs to be added to this repo for production.
+   * - `tap-bigquery <https://github.com/lsst-dm/tap-bigquery>`_
+     - TAP service for querying the PPDB
+     - Work ongoing to add features and optimizations
+   * - `opencadc/tap <https://github.com/opencadc/tap>`_
+     - Base TAP service used by ``tap-bigquery``
+     - Also extended by other Rubin TAP services (Qserv, etc.)
+
+Design Assessment and Outlook
+-----------------------------
 
 Strengths
----------
+^^^^^^^^^
 
 The following summarizes some of the strengths of using BigQuery for the PPDB:
 
@@ -1388,7 +1601,7 @@ The following summarizes some of the strengths of using BigQuery for the PPDB:
   The BigQuery console provides a user-friendly interface for querying and
   managing datasets, and the command-line interface and APIs allow for
   automation and integration with other tools and systems.
-  Authentication and authorization mechanisms are handled seamlessly by
+  Authentication and authorization controls are handled seamlessly by
   Google's IAM service, which should also provide a robust framework for
   managing the permissions and roles for users and services.
 - The cloud-centric architecture should provide a highly scalable and robust
@@ -1422,7 +1635,7 @@ The following summarizes some of the strengths of using BigQuery for the PPDB:
   most common query patterns.
 
 Risks and Limitations
----------------------
+^^^^^^^^^^^^^^^^^^^^^
 
 - The overall complexity of the system is and will be quite high, requiring
   many different components and services operating in concert.
@@ -1442,7 +1655,7 @@ Risks and Limitations
   In theory, the TAP service may implement various optimizations using, but
   but implementing them in a way that avoids "hard coding" Rubin-specific
   knowledge will be challenging (if this is a goal).
-  Generic extension or plugin mechanisms are not a well-supported feature of
+  Generic extension or plugin controls are not a well-supported feature of
   the TAP library, so implementing all of these features in a clean and
   maintainable way could be challenging.
 - Keeping the data in-sync with the APDB presents various challenges.
@@ -1465,7 +1678,7 @@ Risks and Limitations
   heavily or inefficiently.
 
 Future Work
------------
+^^^^^^^^^^^
 
 - Finalization of the data ingestion pipeline should be achieved as soon as
   possible to facilitate data ingestion from the APDB into the PPDB once survey
@@ -1521,58 +1734,6 @@ Future Work
   configuration and management using Terraform.
   Coordination with other Rubin teams is also needed to fully integrate the
   BigQuery TAP service with the RSP and Rubin-specific extensions.
-
-Appendices
-==========
-
-Source-code Repositories
-------------------------
-
-TODO: Make this an appendix.
-
-The PPDB even in its current prototype form involves a large number of source
-code repositories.
-These are summarized below along with their purpose and location.
-
-.. list-table::
-   :header-rows: 1
-
-   * - **Repository**
-     - **Purpose**
-     - **Notes**
-   * - `dax_ppdb <https://github.com/lsst/dax_ppdb>`_
-     - Python interfaces for the PPDB
-     - Additional tooling for BigQuery is planned.
-   * - `dax_apdb <https://github.com/lsst/dax_apdb>`_
-     - Python interfaces for the APDB
-     - Used by ``dax_ppdb`` for accessing the APDB
-   * - `dax_ppdbx_gcp <https://github.com/lsst-dm/dax_ppdbx_gcp>`_
-     - GCP-specific extensions for ``dax_ppdb``
-     - Encapsulates the GCP dependencies and tools for ``dax_ppdb``
-   * - `ppdb-cloud-functions
-       <https://github.com/lsst-dm/ppdb-cloud-functions>`_
-     - Cloud Run functions for data processing on GCP
-     - May be split into one repo per function in the future
-   * - `ppdb-scripts <https://github.com/lsst-dm/ppdb-scripts>`_
-     - Ad hoc dev scripts and config, primarily for GCP
-     - Will be ported to Terraform or Python tools
-   * - `phalanx <https://github.com/lsst-sqre/phalanx>`__
-     - RSP application deployment framework
-     - Deployment and management of the ``ppdb-replication`` application
-   * - `idf_deploy <https://github.com/lsst/idf_deploy>`_
-     - RSP configuration and deployment using Terraform
-     - A PPDB project needs to be added to this repo for production.
-   * - `tap-bigquery <https://github.com/lsst-dm/tap-bigquery>`_
-     - TAP service for querying the PPDB
-     - Work ongoing to add features and optimizations
-   * - `opencadc/tap <https://github.com/opencadc/tap>`_
-     - Base TAP service used by ``tap-bigquery``
-     - Also extended by other Rubin TAP services (Qserv, etc.)
-
-Open Questions and Decision Log
--------------------------------
-
-**TODO**
 
 Additional Appendices (each with own section)
 ---------------------------------------------
