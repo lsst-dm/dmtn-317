@@ -17,7 +17,7 @@ The data will be ingested from the Alert Production Database (APDB) with the
 current plan being to host the data in Google
 `BigQuery <https://cloud.google.com/bigquery>`_.
 A comparison of BigQuery with other options was presented at length in
-*DMTN-308* :cite:`DMTN-308`, and the result of this analysis and discussion
+*DMTN-308* :cite:`DMTN-308`, and the result of this analysis and the discussion
 surrounding it was a decision to proceed with initial development using a
 BigQuery-based system.
 
@@ -32,7 +32,7 @@ change as the design is iterated upon and refined.
 Requirements
 ============
 
-Functional requirements
+Functional Requirements
 -----------------------
 
 TODO: Requirements need to be cleaned up as many of them relate to the APDB,
@@ -84,13 +84,13 @@ which database, though some are shared between both systems.
 Finally, some of the requirements are generic ones that apply to any Rubin
 database system, though they may still be relevant to the PPDB.
 
-Non-Functional requirements
+Non-Functional Requirements
 ---------------------------
 
 TODO: This section seems a bit unnecessarily long and detailed and could
 probably just be subsumed into the general requirements section.
 
-Data processing
+Data Processing
 ^^^^^^^^^^^^^^^
 
 Creating a robust and error-tolerant data processing pipeline for ingesting
@@ -131,8 +131,85 @@ generally do _not_ satisfy all of of these requirements; in particular,
 achieving an adequate level of idempotency and robustness to failure will
 require a significant amount of additional development and testing to achieve.
 
-Database schema
-===============
+System Architecture
+===================
+
+**TODO**
+
+Include diagram of system architecture here along with descriptions
+of:
+
+- All major components: APDB, exporter/uploader, chunk tracking DB,
+  Cloud Storage, Dataflow, BigQuery staging and production datasets,
+  TAP service, RSP, IAM.
+- Data flow between on-prem and cloud environments.
+- Trust boundaries and network connectivity (USDF <-> GCP).
+- Which systems are stateful vs. stateless. (E.g., chunk tracking DB is
+  stateful, Cloud Run functions are stateless, etc.).
+
+Components may forward reference their own dedicated sections.
+
+Dependencies and External Interfaces
+====================================
+
+List:
+
+- External systems and APIs (Cassandra APDB, GCP APIs, TAP, Phalanx, RSP,
+  Felis).
+- Expected versions and compatibility notes.
+- How external library updates are managed and tested.
+
+Security, Access Control and Compliance
+=======================================
+
+**TODO**
+
+Add a dedicated Security and Access Control section describing:
+
+- IAM role definitions for each component (exporter, uploader, Cloud Run,
+  Dataflow, TAP service).
+- Authentication mechanisms (service accounts, workload identity federation,
+  key rotation policies).
+- Network security: VPC, private service access, firewall rules.
+- Handling of sensitive metadata (user logs, query history).
+- Compliance with Rubin Observatory data-sharing policies (e.g., public vs.
+  internal data).
+
+Configuration, Parameterization, and Secrets Management
+=======================================================
+
+**TODO**
+
+Add a section outlining:
+
+- Configuration hierarchy (environment variables, YAML/JSON configs).
+- Use of Secret Manager for credentials, key files, and connection strings.
+- Mechanisms for versioning configuration (Terraform variables, CI/CD
+  environment separation).
+
+Design Assumptions and Sizing
+=============================
+
+**TODO**
+
+Add a section quantifying:
+
+- Expected daily and cumulative data volume (GB/day, number of rows per table,
+  total size after N years, etc.).
+- Target ingestion throughput (chunks/day, rows/day, etc.).
+- Project BigQuery dataset size and query concurrency assumptions.
+- Expected cost scaling under different usage patterns.
+
+Data Model and Database Schema
+==============================
+
+TODO: Expand this section with:
+
+- Mapping of Felis data types to BigQuery data types.
+- Description of data type conversions, null-handling, time precision or format
+  differences (if any).
+- Example YAML snippets for key tables (DiaObject, DiaSource, etc.).
+- Policy for handling deprecated columns and backward-compatibility handling.
 
 Public scientific databases within the Rubin Observatory are generally
 considered to be part of the Science Data Model (SDM) schemas which are
@@ -148,7 +225,7 @@ and MySQL, but in other cases, such as the APDB, the schema's data model is
 translated into a different underlying implementation by an external library,
 which is Cassandra in that case.
 
-Dataset and table creation
+Dataset and Table Creation
 --------------------------
 
 For the PPDB in BigQuery, the APDB's existing YAML file should be used as the
@@ -192,7 +269,7 @@ These operations are very fast and efficient, so having multiple datasets
 should not cause significant overhead compared with a single one, provided that
 the datasets are all in the same GCP project and region.
 
-Extra tables
+Extra Tables
 ------------
 
 In addition to the three main production tables that are replicated to the
@@ -217,7 +294,7 @@ In either case, users could then query directly on this table when they want to
 work with unique objects, and it could also simplify certain types of other
 queries.
 
-Schema migrations
+Schema Migrations
 -----------------
 
 Felis schemas may have an embedded version number which can be incremented when
@@ -247,7 +324,7 @@ Significant downtime could be incurred during these migrations, and unforeseen
 problems could occur, so they should be scheduled during off-hours, as well as
 communicated to users in advance.
 
-Table optimization
+Table Optimization
 ------------------
 
 TODO: Add PK and FK constraints where appropriate, even though they are not
@@ -396,7 +473,7 @@ user queries to use the hashed/bucketed values.
 But this type of partitioning may be the only way to optimize certain query
 patterns, so it may be worth considering long-term.
 
-Performance-optimized table copies
+Performance-optimized Table Copies
 ----------------------------------
 
 Since there are significant trade-offs in performance when selecting the
@@ -419,7 +496,7 @@ Since storage costs are relatively low (less than $25 / month / TB) compared to
 query costs, having multiple copies of tables optimized for different query
 patterns may be worthwhile to reduce the overall cost of the system.
 
-Materialized views
+Materialized Views
 ------------------
 
 Another option which could help optimize table access is using materialized
@@ -435,7 +512,7 @@ Since they may have different clustering columns, performance-optimized table
 copies could also be implemented as materialized views, which would allow them
 to be updated automatically as the underlying data changes.
 
-Data ingestion
+Data Ingestion
 ==============
 
 Overview
@@ -493,7 +570,7 @@ This may mean that the Dataflow jobs (currently only a single job but more
 may be added) would need to be implemented in a standalone fashion that does
 not rely on shared libraries used in other parts of the system.
 
-Chunk tracking
+Chunk Tracking
 --------------
 
 A Postgres database (hereafter referred to as the "chunk tracking database" for
@@ -518,7 +595,7 @@ a private DNS name.
 (The external address used for inbound USDF connections is not accessible from
 within GCP.)
 
-Export and upload
+Export and Upload
 -----------------
 
 The data ingestion process begins with exporting data from the APDB into local
@@ -648,7 +725,7 @@ process while taking into account the data rates, processing times, and desire
 to make data available as soon as possible, both for end users and downstream
 data processing.
 
-Updating existing data
+Updating Existing Data
 ----------------------
 
 Updates to existing records may occur in the APDB, which will then need to be
@@ -681,16 +758,29 @@ performed as well, including but not limited to:
   a "time withdrawn" column to a valid date.
 
 An additional complexity is that some types of updates may need to be ordered
-in time, as results of multiple operations may also depend on the order in which they are
-applied.
+in time, as results of multiple operations may also depend on the order in
+which they are applied.
 Overall, the implementation of these updates in the PPDB will first depend on
 these processes being fully defined and specified and then implemented in the
 APDB, which is still ongoing work.
 
-User access
+Error Handling and Recovery Scenarios
+-------------------------------------
+
+**TODO**
+
+Create a section expanding on:
+
+- How each pipeline stage recovers from transient vs. persistent errors.
+- Retry policies for Cloud Run and Dataflow.
+- Handling of partially ingested chunks or out-of-order data.
+- Criteria for quarantining or skipping problematic chunks.
+- Manual intervention playbooks for operators.
+
+User Access
 ===========
 
-TAP service
+TAP Service
 -----------
 
 It is planned that the PPDB will provide user access through a TAP service
@@ -786,7 +876,7 @@ Java code, e.g., ``ppdb`` in TAP_SCHEMA is mapped to
 Ideally, this mapping would be configurable in some way, either via a
 configuration file, argument to the TAP server, or environment variable.
 
-Table uploads
+Table Uploads
 ^^^^^^^^^^^^^
 
 TODO: More details could be included in this section on how user uploads could
@@ -808,7 +898,7 @@ BigQuery dataset (and possibly within another GCP project) for security and
 access control reasons, as well as to avoid cluttering the main PPDB dataset
 with potentially hundreds of user tables.
 
-Spatial query support
+Spatial Query Support
 ---------------------
 
 Spatial queries are a commonly used pattern when searching astronomical
@@ -829,7 +919,7 @@ to ``FALSE`` to use the spherical model.
 This would be done automatically in the TAP service when rewriting ADQL queries
 to BigQuery SQL.
 
-Cone search
+Cone Search
 ^^^^^^^^^^^
 
 One of the most common spatial query patterns is a cone search, which finds
@@ -862,7 +952,7 @@ Initial testing has shown that using ``GEOGRAPHY`` columns can reduce the amount
 of data scanned by up to several orders of magnitude, which can significantly
 reduce query costs and latency.
 
-Nearest neighbor search
+Nearest Neighbor Search
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 Another common spatial query pattern is a nearest neighbor search, where
@@ -896,14 +986,14 @@ Or the query itself could be rewritten to use the full composite primary key
 (``diaObjectId`` plus validity start) in order to ensure uniqueness of the
 results.
 
-Additional query patterns
+Additional Query Patterns
 -------------------------
 
 In addition to spatial queries, the PPDB will need to support other common
 query patterns. These will not be covered exhaustively here, but several common
 ones will be considered.
 
-Single object selection
+Single Object Selection
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 Sometimes users will want to select a single, known object by its unique
@@ -923,7 +1013,7 @@ when choosing which columns to cluster on and in which order.
 If ``diaobjectId`` was the first clustering column, single object queries would
 be optimized but the performance of other types of queries might be degraded.
 
-Table joins
+Table Joins
 ^^^^^^^^^^^
 
 Joins between tables are a common query pattern, such as joining ``DiaSource``
@@ -951,7 +1041,7 @@ Further experimentation is needed to determine the optimal clustering strategy
 or other techniques that could be used to reduce data scanned when joining
 tables.
 
-Table scans
+Table Scans
 ^^^^^^^^^^^
 
 Some types of queries will naturally require a full table scan, such as
@@ -978,7 +1068,42 @@ tables, may also be used to skip over data blocks that do not contain any
 matching records, though this cannot be relied upon as a consistent
 optimization strategy.
 
-Deployment and operations
+Testing, Validation, and QA Strategy
+====================================
+
+**TODO**
+
+Add a section summarizing testing methodologies:
+
+- Unit/integration tests for ingestion and schema creation tools.
+- Validation checks on staged vs. production data.
+- Continuous integration (CI) setup, e.g., GitHub Actions workflows and linting.
+- Mock or sandbox environments for testing pipeline updates.
+
+Release and Versioning Plan
+===========================
+
+**TODO**
+
+Document:
+
+- Version numbering for datasets, schema, and software (semantic version
+  alignment).
+- Tagging and release process across repositories.
+- Compatibility matrix between schema versions and code components.
+- Policy for deprecating older schema versions.
+
+Performance Testing and Validation
+==================================
+
+Add a section detailing:
+
+- Benchmarks used (dataset sizes, query patterns).
+- Performance metrics collected (query latency, ingestion latency, throughput).
+- Validation methods to ensure data integrity post-ingestion.
+- Plans for load and stress testing before operations.
+
+Deployment and Operations
 =========================
 
 Most components of the PPDB will be deployed and operated on GCP, though some
@@ -987,7 +1112,7 @@ The PPDB could therefore be considered a hybrid cloud system, though only the
 first few steps of the data ingestion process are on-premises, with all other
 components running in the cloud.
 
-USDF deployment
+USDF Deployment
 ---------------
 
 The two components of the system which much run on-premises at the USDF are the
@@ -1014,8 +1139,8 @@ the APDB and the retention period, as well as the Parquet compression level,
 but it is likely that at least 10 TB of disk space should be allocated for this
 initially, with the capability to expand if necessary.
 
-GCP deployment
---------------
+Cloud Deployment
+----------------
 
 All of the other components of the PPDB will run on GCP, with the exception of
 the TAP service, which should eventually be able to run within an RSP
@@ -1027,8 +1152,8 @@ a Service (SaaS) model, which should reduce operational burden, but all
 together they will still require significant effort for their configuration and
 management.
 
-GCP services
-^^^^^^^^^^^^
+Cloud Services
+^^^^^^^^^^^^^^
 
 Required GCP services must be enabled in the project before they can be used.
 These are summarized below with their purpose for the PPDB and the tasks
@@ -1077,7 +1202,7 @@ involved in setting them up.
      - - topic creation
        - subscription creation
 
-Terraform deployment
+Terraform Deployment
 ^^^^^^^^^^^^^^^^^^^^
 
 Google projects within Rubin are generally managed using the
@@ -1112,7 +1237,7 @@ main branch (This is the approach currently used by other Rubin projects.)
 Which components are managed by Terraform and which are managed by other
 tools still needs to be determined.
 
-Backup and recovery
+Backup and Recovery
 -------------------
 
 The PPDB will need to implement a backup and recovery strategy to ensure data
@@ -1214,47 +1339,30 @@ is a cloud dashboard application such as
 information from multiple GCP services and would be ideally suited for querying
 BigQuery datasets to generate custom reports and visualizations.
 
-Source-code repositories
-========================
+Operational Procedures and Runbook
+----------------------------------
 
-The PPDB even in its current prototype form involves a large number of source
-code repositories.
-These are summarized below along with their purpose and location.
+Include a section describing day-to-day operational practices:
 
-.. list-table::
-   :header-rows: 1
+- Routine tasks (monitoring dashboards, verifying daily promotion).
+- Escalation and incident response procedures.
+- How to roll back or replay chunks.
+- Deployment pipelines (staging → production promotions).
+- Maintenance windows and change-management policy.
 
-   * - **Repository**
-     - **Purpose**
-     - **Notes**
-   * - `dax_ppdb <https://github.com/lsst/dax_ppdb>`_
-     - Python interfaces for the PPDB
-     - Additional tooling for BigQuery is planned.
-   * - `dax_apdb <https://github.com/lsst/dax_apdb>`_
-     - Python interfaces for the APDB
-     - Used by ``dax_ppdb`` for accessing the APDB
-   * - `dax_ppdbx_gcp <https://github.com/lsst-dm/dax_ppdbx_gcp>`_
-     - GCP-specific extensions for ``dax_ppdb``
-     - Encapsulates the GCP dependencies and tools for ``dax_ppdb``
-   * - `ppdb-cloud-functions
-       <https://github.com/lsst-dm/ppdb-cloud-functions>`_
-     - Cloud Run functions for data processing on GCP
-     - May be split into one repo per function in the future
-   * - `ppdb-scripts <https://github.com/lsst-dm/ppdb-scripts>`_
-     - Ad hoc dev scripts and config, primarily for GCP
-     - Will be ported to Terraform or Python tools
-   * - `phalanx <https://github.com/lsst-sqre/phalanx>`__
-     - RSP application deployment framework
-     - Deployment and management of the ``ppdb-replication`` application
-   * - `idf_deploy <https://github.com/lsst/idf_deploy>`_
-     - RSP configuration and deployment using Terraform
-     - A PPDB project needs to be added to this repo for production.
-   * - `tap-bigquery <https://github.com/lsst-dm/tap-bigquery>`_
-     - TAP service for querying the PPDB
-     - Work ongoing to add features and optimizations
-   * - `opencadc/tap <https://github.com/opencadc/tap>`_
-     - Base TAP service used by ``tap-bigquery``
-     - Also extended by other Rubin TAP services (Qserv, etc.)
+Cost Model and Budget Management
+================================
+
+**TODO**
+
+Extend the Future work “cost control” bullet into a dedicated Cost Estimation
+and Optimization section with:
+
+- Current estimated monthly cost breakdown: BigQuery storage, query usage,
+  Dataflow, GCS.
+- Cost-mitigation strategies: clustering reuse, scheduled query limits, cost
+  alerts.
+- Reference to project quotas and budget enforcement mechanisms.
 
 Conclusions
 ===========
@@ -1313,7 +1421,7 @@ The following summarizes some of the strengths of using BigQuery for the PPDB:
   table copies can be investigated and implemented as needed to optimize the
   most common query patterns.
 
-Risks and limitations
+Risks and Limitations
 ---------------------
 
 - The overall complexity of the system is and will be quite high, requiring
@@ -1356,7 +1464,7 @@ Risks and limitations
   could be unpredictable and potentially very high should the system be used
   heavily or inefficiently.
 
-Future work
+Future Work
 -----------
 
 - Finalization of the data ingestion pipeline should be achieved as soon as
@@ -1413,6 +1521,68 @@ Future work
   configuration and management using Terraform.
   Coordination with other Rubin teams is also needed to fully integrate the
   BigQuery TAP service with the RSP and Rubin-specific extensions.
+
+Appendices
+==========
+
+Source-code Repositories
+------------------------
+
+TODO: Make this an appendix.
+
+The PPDB even in its current prototype form involves a large number of source
+code repositories.
+These are summarized below along with their purpose and location.
+
+.. list-table::
+   :header-rows: 1
+
+   * - **Repository**
+     - **Purpose**
+     - **Notes**
+   * - `dax_ppdb <https://github.com/lsst/dax_ppdb>`_
+     - Python interfaces for the PPDB
+     - Additional tooling for BigQuery is planned.
+   * - `dax_apdb <https://github.com/lsst/dax_apdb>`_
+     - Python interfaces for the APDB
+     - Used by ``dax_ppdb`` for accessing the APDB
+   * - `dax_ppdbx_gcp <https://github.com/lsst-dm/dax_ppdbx_gcp>`_
+     - GCP-specific extensions for ``dax_ppdb``
+     - Encapsulates the GCP dependencies and tools for ``dax_ppdb``
+   * - `ppdb-cloud-functions
+       <https://github.com/lsst-dm/ppdb-cloud-functions>`_
+     - Cloud Run functions for data processing on GCP
+     - May be split into one repo per function in the future
+   * - `ppdb-scripts <https://github.com/lsst-dm/ppdb-scripts>`_
+     - Ad hoc dev scripts and config, primarily for GCP
+     - Will be ported to Terraform or Python tools
+   * - `phalanx <https://github.com/lsst-sqre/phalanx>`__
+     - RSP application deployment framework
+     - Deployment and management of the ``ppdb-replication`` application
+   * - `idf_deploy <https://github.com/lsst/idf_deploy>`_
+     - RSP configuration and deployment using Terraform
+     - A PPDB project needs to be added to this repo for production.
+   * - `tap-bigquery <https://github.com/lsst-dm/tap-bigquery>`_
+     - TAP service for querying the PPDB
+     - Work ongoing to add features and optimizations
+   * - `opencadc/tap <https://github.com/opencadc/tap>`_
+     - Base TAP service used by ``tap-bigquery``
+     - Also extended by other Rubin TAP services (Qserv, etc.)
+
+Open Questions and Decision Log
+-------------------------------
+
+**TODO**
+
+Additional Appendices (each with own section)
+---------------------------------------------
+
+These could include:
+
+- Glossary of acronyms and LSST-specific terminology.
+- Example chunk manifest and staging workflow.
+- Sample BigQuery DDL for one schema version.
+- Prototype cost summary table.
 
 .. _LDM-135: https://ldm-135.lsst.io
 .. _LDM-555: https://ldm-555.lsst.io
