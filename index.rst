@@ -1460,6 +1460,10 @@ Monitoring and Logging
 
 Monitoring and logging will be critical for operating the PPDB in a production
 environment.
+
+ppdb-replication
+^^^^^^^^^^^^^^^^
+
 For the on-premises components running at the USDF, Grafana can be used with
 Loki to collect and visualize logs and metrics for the ``ppdb-replication``
 application (This is the approach used by many existing RSP applications
@@ -1470,6 +1474,16 @@ when they fall behind or even fail.
 System resource usage may also need to be monitored to ensure that there is
 sufficient CPU, memory, and disk space available for these processes to run
 smoothly.
+
+Uncaught exceptions and error-level logs will be captured by `Sentry`_.
+They will be sent to the `ppdb-replication Sentry project`_.
+Slack notifications for these events will be sent to ``#status-ppdb-dev``,
+``#status-ppdb-int``, and ``#status-ppdb-prod``.
+The Sentry project and alerts are configured via `Terraform`_ the `Prodromos`_
+repo.
+
+Google Cloud Workloads
+^^^^^^^^^^^^^^^^^^^^^^
 
 On GCP, there are several standard monitoring and logging services that can be
 used to track the health and performance of the various components.
@@ -1484,6 +1498,35 @@ Similarly, Dataflow jobs have built-in monitoring and logging feature which are
 accessible from the GCP console.
 All the other services either have their own monitoring and logging features or
 are accessible from the general Cloud Monitoring and Logging service (or both).
+
+All Cloud Run workloads, including all Functions, Services, and Jobs, report error-level log messages and uncaught exceptions to Sentry to the `ppdb-google-cloud Sentry project`_.
+Slack notifications for these events will be sent to ``#status-ppdb-dev``,
+``#status-ppdb-int``, and ``#status-ppdb-prod``. These are provisioned via Terraform in the Prodromos repo.
+We also have a series of Google Cloud alerts, also configured in Prodromos:
+
+* Any error-level log messages to log streams other than ``stderr``.
+  These are log messages from Google outside of our workload code, and won't
+  get captured by Sentry. Anything that logs to ``stderr`` should come from our
+  code and will be captured by Sentry.
+* Any time a Cloud Run workload fails after exhasting all of its retries.
+  This will fire for jobs, services, and functions, all of which
+  (frustratingly) have different semantics around how to alert on them.
+
+Note that the Google Cloud error log message alerts are configured with
+`log-based metrics`_ rather than `log-based alerts`_.
+Log-based alerts are
+nicer because they include the offending log messages in the Slack
+notifications, but according to the `log-based alerts quota docs`_, they will
+only notify 20 times per day, and then just silently not notify anymore.
+
+The error handling strategy for the Cloud Run workloads is a bit surprising.
+As the `Cloud Run retry docs`_ describe, retries are triggered by function
+failure, so any retryable error needs to fail the function, say, with an
+uncaught exception.
+Any fatal non-retryable error successfully exits the function successfully, and
+we must remember to log an error message.
+This makes the logs-based alerts especially important, as failures will not
+show up in the Cloud Run failure metrics.
 
 While the built-in GCP services are quite useful, they may not be sufficiently
 integrated or targeted for use in a production environment.
@@ -1573,6 +1616,9 @@ These are summarized below along with their purpose and location.
    * - `idf_deploy <https://github.com/lsst/idf_deploy>`_
      - RSP configuration and deployment using Terraform
      - A PPDB project needs to be added to this repo for production.
+   * - `Prodromos`_
+     - Sentry alert configuration
+     - Google Cloud alert configuration
    * - `tap-bigquery <https://github.com/lsst-dm/tap-bigquery>`_
      - TAP service for querying the PPDB
      - Work ongoing to add features and optimizations
@@ -1760,3 +1806,13 @@ References
 ==========
 
 .. bibliography::
+
+.. _Cloud Run retry docs: https://docs.cloud.google.com/run/docs/tips/function-retries#distinguish_between_functions_that_can_be_retried_and_fatal_errors
+.. _log-based alerts: https://docs.cloud.google.com/logging/docs/alerting/log-based-alerts
+.. _log-based alerts quota docs: https://docs.cloud.google.com/logging/docs/alerting/monitoring-logs#alerts-log
+.. _log-based metrics: https://docs.cloud.google.com/logging/docs/logs-based-metrics
+.. _ppdb-google-cloud Sentry project: https://rubin-observatory.sentry.io/projects/ppdb-google-cloud/?project=4512023275569152
+.. _ppdb-replication Sentry project: https://rubin-observatory.sentry.io/projects/ppdb-replication/?project=4512023276027904
+.. _Prodromos: https://github.com/lsst-sqre/prodromos
+.. _Sentry: https://sentry.io
+.. _Terraform: https://terraform.io
